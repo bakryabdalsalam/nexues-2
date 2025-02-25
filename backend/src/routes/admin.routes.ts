@@ -6,6 +6,7 @@ import { AuthenticatedRequest } from '../types';
 import { subDays, format } from 'date-fns';
 import { validateJobCreation } from '../middleware/validation.middleware';
 import { adminController } from '../controllers/admin.controller';
+import { emailTemplateController } from '../controllers/emailTemplate.controller';
 
 const router = Router();
 
@@ -441,4 +442,9 @@ router.delete('/jobs/:id', authenticate, requireAdmin, async (req: Request, res:
   }
 });
 
-export { router as adminRoutes }; 
+router.get('/email-templates', authenticate, requireAdmin, emailTemplateController.getAll);
+router.post('/email-templates', authenticate, requireAdmin, emailTemplateController.create);
+router.put('/email-templates/:id', authenticate, requireAdmin, emailTemplateController.update);
+router.delete('/email-templates/:id', authenticate, requireAdmin, emailTemplateController.delete);
+
+export { router as adminRoutes };
