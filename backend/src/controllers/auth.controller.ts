@@ -1,17 +1,45 @@
 import { Request, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
-import { hashPassword, comparePasswords, generateToken } from '../utils/auth.utils';
+import { 
+  hashPassword, 
+  comparePasswords, 
+  generateAccessToken, 
+  generateRefreshToken,
+  validatePassword,
+  verifyToken
+} from '../utils/auth.utils';
+import { AppError } from '../middleware/error.middleware';
+import { AuthenticatedRequest } from '../types';
 
 const prisma = new PrismaClient();
+
+const COOKIE_OPTIONS = {
+  httpOnly: true,
+  secure: process.env.NODE_ENV === 'production',
+  sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+  maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+  path: '/'
+} as const;
 
 export const authController = {
   async register(req: Request, res: Response) {
     try {
       const { email, password, name } = req.body;
 
+      // Validate email
+      if (!email || !email.includes('@')) {
+        throw new AppError(400, 'Invalid email address');
+      }
+
+      // Validate password
+      const passwordValidation = validatePassword(password);
+      if (!passwordValidation.isValid) {
+        throw new AppError(400, passwordValidation.message);
+      }
+
       const existingUser = await prisma.user.findUnique({ where: { email } });
       if (existingUser) {
-        return res.status(400).json({ message: 'Email already registered' });
+        throw new AppError(400, 'Email already registered');
       }
 
       const hashedPassword = await hashPassword(password);
@@ -32,10 +60,31 @@ export const authController = {
         }
       });
 
-      const token = generateToken(user);
-      res.status(201).json({ user, token });
+      const accessToken = generateAccessToken(user);
+      const refreshToken = generateRefreshToken(user);
+
+      // Set refresh token in HTTP-only cookie
+      res.cookie('refresh_token', refreshToken, COOKIE_OPTIONS);
+
+      res.status(201).json({ 
+        success: true,
+        data: {
+          user,
+          token: accessToken
+        }
+      });
     } catch (error) {
-      res.status(500).json({ message: 'Error creating user' });
+      if (error instanceof AppError) {
+        res.status(error.statusCode).json({ 
+          success: false,
+          message: error.message 
+        });
+      } else {
+        res.status(500).json({ 
+          success: false,
+          message: 'Error creating user' 
+        });
+      }
     }
   },
 
@@ -43,28 +92,56 @@ export const authController = {
     try {
       const { email, password } = req.body;
 
-      const user = await prisma.user.findUnique({ where: { email } });
+      if (!email || !password) {
+        throw new AppError(400, 'Email and password are required');
+      }
+
+      const user = await prisma.user.findUnique({ 
+        where: { email },
+        select: {
+          id: true,
+          email: true,
+          name: true,
+          role: true,
+          password: true
+        }
+      });
+
       if (!user) {
-        return res.status(401).json({ message: 'Invalid credentials' });
+        throw new AppError(401, 'Invalid credentials');
       }
 
       const isValidPassword = await comparePasswords(password, user.password);
       if (!isValidPassword) {
-        return res.status(401).json({ message: 'Invalid credentials' });
+        throw new AppError(401, 'Invalid credentials');
       }
 
-      const token = generateToken(user);
+      const { password: _, ...userWithoutPassword } = user;
+      const accessToken = generateAccessToken(userWithoutPassword);
+      const refreshToken = generateRefreshToken(userWithoutPassword);
+
+      // Set refresh token in HTTP-only cookie
+      res.cookie('refresh_token', refreshToken, COOKIE_OPTIONS);
+
       res.json({
-        user: {
-          id: user.id,
-          email: user.email,
-          name: user.name,
-          role: user.role
-        },
-        token
+        success: true,
+        data: {
+          user: userWithoutPassword,
+          token: accessToken
+        }
       });
     } catch (error) {
-      res.status(500).json({ message: 'Error during login' });
+      if (error instanceof AppError) {
+        res.status(error.statusCode).json({ 
+          success: false,
+          message: error.message 
+        });
+      } else {
+        res.status(500).json({ 
+          success: false,
+          message: 'Error during login' 
+        });
+      }
     }
   },
 
@@ -73,10 +150,10 @@ export const authController = {
       const refreshToken = req.cookies['refresh_token'];
       
       if (!refreshToken) {
-        return res.status(401).json({ message: 'Refresh token required' });
+        throw new AppError(401, 'Refresh token required');
       }
 
-      const decoded = jwt.verify(refreshToken, process.env.REFRESH_TOKEN_SECRET!) as UserPayload;
+      const decoded = verifyToken(refreshToken, true);
       const user = await prisma.user.findUnique({ 
         where: { id: decoded.id },
         select: {
@@ -88,22 +165,124 @@ export const authController = {
       });
 
       if (!user) {
-        return res.status(401).json({ message: 'User not found' });
+        throw new AppError(401, 'User not found');
       }
 
-      const token = generateToken(user);
+      const accessToken = generateAccessToken(user);
       const newRefreshToken = generateRefreshToken(user);
 
-      res.cookie('refresh_token', newRefreshToken, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: 'strict',
-        maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+      res.cookie('refresh_token', newRefreshToken, COOKIE_OPTIONS);
+
+      res.json({
+        success: true,
+        data: {
+          user,
+          token: accessToken
+        }
+      });
+    } catch (error) {
+      console.error('Refresh token error:', error);
+      res.clearCookie('refresh_token', {
+        ...COOKIE_OPTIONS,
+        maxAge: 0
+      });
+      if (error instanceof AppError) {
+        res.status(error.statusCode).json({ 
+          success: false,
+          message: error.message 
+        });
+      } else {
+        res.status(401).json({ 
+          success: false,
+          message: 'Invalid refresh token' 
+        });
+      }
+    }
+  },
+
+  async logout(req: Request, res: Response) {
+    try {
+      // Clear the refresh token cookie
+      res.clearCookie('refresh_token', {
+        ...COOKIE_OPTIONS,
+        maxAge: 0
       });
 
-      res.json({ token });
+      // Send success response
+      res.status(200).json({
+        success: true,
+        message: 'Logged out successfully'
+      });
     } catch (error) {
-      res.status(401).json({ message: 'Invalid refresh token' });
+      console.error('Logout error:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Error during logout'
+      });
+    }
+  },
+
+  async getProfile(req: AuthenticatedRequest, res: Response) {
+    try {
+      // User is already verified and attached by the authenticate middleware
+      const { user } = req;
+
+      const userWithProfile = await prisma.user.findUnique({
+        where: { id: user.id },
+        select: {
+          id: true,
+          email: true,
+          name: true,
+          role: true,
+          profile: true
+        }
+      });
+
+      if (!userWithProfile) {
+        throw new AppError(404, 'User not found');
+      }
+
+      res.json({
+        success: true,
+        data: userWithProfile
+      });
+    } catch (error) {
+      console.error('Get profile error:', error);
+      if (error instanceof AppError) {
+        res.status(error.statusCode).json({ 
+          success: false,
+          message: error.message 
+        });
+      } else {
+        res.status(500).json({ 
+          success: false,
+          message: 'Error fetching profile' 
+        });
+      }
+    }
+  },
+
+  async verifyToken(req: AuthenticatedRequest, res: Response) {
+    try {
+      // User is already verified and attached by the authenticate middleware
+      const { user } = req;
+      res.json({
+        success: true,
+        data: user
+      });
+    } catch (error) {
+      console.error('Verify token error:', error);
+      if (error instanceof AppError) {
+        res.status(error.statusCode).json({ 
+          success: false,
+          message: error.message 
+        });
+      } else {
+        res.status(500).json({ 
+          success: false,
+          message: 'Error verifying token' 
+        });
+      }
     }
   }
 };

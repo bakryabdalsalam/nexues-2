@@ -1,21 +1,20 @@
 export interface Job {
   id: string;
   title: string;
+  description: string;
   company: string;
   location: string;
-  salary?: number;
-  experienceLevel?: string;
-  description?: string;
-  requirements?: string[];
-  postedDate: Date;
+  experienceLevel: string;
+  category: string;
+  salary: number | null;
+  createdAt: string;
+  updatedAt: string;
+  _count?: {
+    applications: number;
+  };
 }
 
-export interface User {
-  id: string;
-  name: string;
-  email: string;
-  role: 'user' | 'admin';
-}
+export type ApplicationStatus = 'PENDING' | 'REVIEWING' | 'ACCEPTED' | 'REJECTED';
 
 export interface Application {
   id: string;
@@ -30,16 +29,24 @@ export interface Application {
   user: User;
 }
 
-export enum ApplicationStatus {
-  PENDING = 'PENDING',
-  REVIEWING = 'REVIEWING',
-  ACCEPTED = 'ACCEPTED',
-  REJECTED = 'REJECTED'
+export interface User {
+  id: string;
+  name: string;
+  email: string;
+  role: 'USER' | 'ADMIN';
+  isActive: boolean;
+  _count?: {
+    applications: number;
+  };
 }
 
 export interface AuthResponse {
-  user: User;
-  token: string;
+  success: boolean;
+  data: {
+    user: User;
+    token: string;
+  };
+  message?: string;
 }
 
 export interface ApiResponse<T> {
@@ -49,11 +56,12 @@ export interface ApiResponse<T> {
   error?: string;
 }
 
-export interface PaginatedResponse<T> extends ApiResponse<T> {
+export interface PaginatedResponse<T> {
+  data: T;
   pagination: {
-    page: number;
-    limit: number;
     total: number;
     pages: number;
+    page: number;
+    limit: number;
   };
 }

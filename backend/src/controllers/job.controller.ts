@@ -1,5 +1,10 @@
 import { Request, Response } from 'express';
 import { db } from '../services/database.service';
+import { PrismaClient, Prisma } from '@prisma/client';
+import { AuthenticatedRequest } from '../types';
+import { AppError } from '../middleware/error.middleware';
+
+const prisma = new PrismaClient();
 
 export const jobController = {
   getJobs: async (req: Request, res: Response) => {
@@ -8,8 +13,58 @@ export const jobController = {
       const limit = parseInt(req.query.limit as string) || 10;
       const skip = (page - 1) * limit;
 
+      // Extract search filters from query params
+      const {
+        keyword,
+        location,
+        category,
+        experienceLevel,
+        salary_min,
+        salary_max,
+        employmentType,
+        remote
+      } = req.query;
+
+      // Build where clause based on filters
+      const where: any = {};
+
+      if (keyword) {
+        where.OR = [
+          { title: { contains: keyword as string, mode: 'insensitive' } },
+          { description: { contains: keyword as string, mode: 'insensitive' } },
+          { company: { contains: keyword as string, mode: 'insensitive' } }
+        ];
+      }
+
+      if (location) {
+        where.location = { equals: location as string };
+      }
+
+      if (category) {
+        where.category = { equals: category as string };
+      }
+
+      if (experienceLevel) {
+        where.experienceLevel = { equals: experienceLevel as string };
+      }
+
+      if (salary_min || salary_max) {
+        where.salary = {};
+        if (salary_min) where.salary.gte = parseInt(salary_min as string);
+        if (salary_max) where.salary.lte = parseInt(salary_max as string);
+      }
+
+      if (employmentType) {
+        where.employmentType = { equals: employmentType as string };
+      }
+
+      if (remote !== undefined) {
+        where.remote = remote === 'true';
+      }
+
       const [jobs, total] = await Promise.all([
         db.job.findMany({
+          where,
           skip,
           take: limit,
           orderBy: { createdAt: 'desc' },
@@ -29,7 +84,7 @@ export const jobController = {
             }
           }
         }),
-        db.job.count()
+        db.job.count({ where })
       ]);
 
       res.json({
@@ -47,7 +102,7 @@ export const jobController = {
       res.status(500).json({ 
         success: false,
         message: 'Error fetching jobs',
-        error: process.env.NODE_ENV === 'development' ? error.message : undefined 
+        error: error instanceof Error ? error.message : 'Unknown error'
       });
     }
   },
@@ -94,7 +149,8 @@ export const jobController = {
           location: req.body.location,
           experienceLevel: req.body.experienceLevel,
           category: req.body.category,
-          salary: req.body.salary ? parseFloat(req.body.salary) : null
+          salary: req.body.salary ? parseFloat(req.body.salary) : null,
+          remote: req.body.remote || false
         }
       });
       res.status(201).json({
@@ -122,7 +178,8 @@ export const jobController = {
           location: req.body.location,
           experienceLevel: req.body.experienceLevel,
           category: req.body.category,
-          salary: req.body.salary ? parseFloat(req.body.salary) : null
+          salary: req.body.salary ? parseFloat(req.body.salary) : null,
+          remote: req.body.remote || undefined
         }
       });
       res.json({
@@ -154,6 +211,80 @@ export const jobController = {
         success: false,
         message: 'Error deleting job'
       });
+    }
+  },
+
+  async getRecommendations(req: AuthenticatedRequest, res: Response) {
+    try {
+      const userId = req.user.id;
+
+      // Get user's profile and previous applications
+      const userProfile = await prisma.profile.findUnique({
+        where: { userId },
+        include: {
+          user: {
+            include: {
+              applications: {
+                include: {
+                  job: true
+                }
+              }
+            }
+          }
+        }
+      });
+
+      if (!userProfile) {
+        throw new AppError(404, 'User profile not found');
+      }
+
+      // Extract user's skills and previous job categories
+      const userSkills = userProfile.skills || [];
+      const previousCategories = userProfile.user.applications.map(app => app.job.category);
+
+      // Find jobs matching user's skills and categories
+      const recommendedJobs = await prisma.job.findMany({
+        where: {
+          OR: [
+            // Match by skills (if any skills are specified)
+            ...(userSkills.length > 0 ? [{
+              description: {
+                contains: userSkills.join(' '),
+                mode: Prisma.QueryMode.insensitive
+              }
+            }] : []),
+            // Match by previous job categories
+            ...(previousCategories.length > 0 ? [{
+              category: {
+                in: previousCategories
+              }
+            }] : [])
+          ] as Prisma.JobWhereInput[],
+          // Exclude jobs user has already applied to
+          NOT: {
+            applications: {
+              some: {
+                userId
+              }
+            }
+          }
+        },
+        take: 6,
+        orderBy: {
+          createdAt: 'desc'
+        }
+      });
+
+      res.json({
+        success: true,
+        data: recommendedJobs
+      });
+    } catch (error) {
+      console.error('Error getting job recommendations:', error);
+      if (error instanceof AppError) {
+        throw error;
+      }
+      throw new AppError(500, 'Failed to get job recommendations');
     }
   }
 };

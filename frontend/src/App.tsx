@@ -1,11 +1,12 @@
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import React, { useEffect } from 'react';
+import { BrowserRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { AuthProvider } from './context/AuthContext';
 import { LoadingProvider } from './context/LoadingContext';
 import { ToastContainer } from 'react-toastify';
 import { Header } from './components/layout/Header';
 import { AppRoutes } from './routes';
-import { RegisterPage } from './pages/RegisterPage';
+import { useAuthStore } from './store/auth.store';
+import { AuthProvider } from './context/AuthContext';
 import 'react-toastify/dist/ReactToastify.css';
 
 const queryClient = new QueryClient({
@@ -17,7 +18,19 @@ const queryClient = new QueryClient({
   },
 });
 
-export const App = () => {
+export const App: React.FC = () => {
+  const { checkAuth } = useAuthStore();
+
+  useEffect(() => {
+    // Check authentication state when app loads
+    const initAuth = async () => {
+      console.log('Initializing auth state...');
+      await checkAuth();
+      console.log('Auth state initialized');
+    };
+    initAuth();
+  }, [checkAuth]);
+
   return (
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
@@ -26,10 +39,6 @@ export const App = () => {
             <div className="min-h-screen bg-gray-50">
               <Header />
               <main className="container mx-auto px-4 py-8">
-                <Routes>
-                  <Route path="/register" element={<RegisterPage />} />
-                  {/* ...other routes... */}
-                </Routes>
                 <AppRoutes />
               </main>
               <ToastContainer position="top-right" />

@@ -1,7 +1,7 @@
-import dotenv from 'dotenv';
-import { app } from './app.js';
+import * as dotenv from 'dotenv';
+import { app } from './app';
 import { Express } from 'express';
-import { initializeDatabase } from './utils/init-db.js';
+import { initializeDatabase } from './utils/init-db';
 
 dotenv.config();
 

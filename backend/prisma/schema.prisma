@@ -9,15 +9,18 @@ datasource db {
 }
 
 model User {
-  id            String        @id @default(uuid())
+  id            String        @id @default(cuid())
   email         String        @unique
   password      String
   name          String?
   role          UserRole      @default(USER)
+  isActive      Boolean       @default(true)
   profile       Profile?
   applications  Application[]
   createdAt     DateTime      @default(now())
   updatedAt     DateTime      @updatedAt
+
+  @@map("users")
 }
 
 model Profile {
@@ -41,6 +44,7 @@ model Job {
   experienceLevel String
   category        String
   salary          Float?
+  remote          Boolean       @default(false)
   applications    Application[]
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt

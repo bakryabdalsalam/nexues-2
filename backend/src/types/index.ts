@@ -1,3 +1,5 @@
+import { Request } from 'express';
+
 export interface UserPayload {
   id: string;
   email: string;
@@ -14,4 +16,14 @@ export interface JobFilters {
 export interface PaginationOptions {
   page?: number;
   limit?: number;
+}
+
+export interface TokenPayload {
+  id: string;
+  email: string;
+  role: 'USER' | 'ADMIN';
+}
+
+export interface AuthenticatedRequest extends Request {
+  user: TokenPayload;
 }

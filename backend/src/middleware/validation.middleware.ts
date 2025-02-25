@@ -2,62 +2,75 @@ import { Request, Response, NextFunction } from 'express';
 import { body, validationResult } from 'express-validator';
 
 export const validateRegistration = [
-  body('email').isEmail().withMessage('Invalid email address'),
+  body('email')
+    .isEmail()
+    .withMessage('Please provide a valid email address'),
   body('password')
-    .isLength({ min: 6 })
-    .withMessage('Password must be at least 6 characters'),
-  body('name').notEmpty().withMessage('Name is required'),
-  validateResults
+    .matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)[A-Za-z\d]{8,}$/)
+    .withMessage('Password must be at least 8 characters long and contain at least one uppercase letter, one lowercase letter, and one number'),
+  body('name')
+    .trim()
+    .notEmpty()
+    .withMessage('Name is required')
 ];
 
 export const validateLogin = [
-  body('email').isEmail().withMessage('Invalid email address'),
-  body('password').notEmpty().withMessage('Password is required'),
-  validateResults
+  body('email')
+    .isEmail()
+    .withMessage('Please provide a valid email address'),
+  body('password')
+    .notEmpty()
+    .withMessage('Password is required')
 ];
 
 export const validateJobCreation = [
   body('title')
-    .notEmpty()
     .trim()
-    .isLength({ min: 3, max: 100 })
-    .withMessage('Title must be between 3 and 100 characters'),
-  
+    .notEmpty()
+    .withMessage('Job title is required'),
   body('description')
-    .notEmpty()
     .trim()
-    .isLength({ min: 10, max: 5000 })
-    .withMessage('Description must be between 10 and 5000 characters'),
-  
+    .notEmpty()
+    .withMessage('Job description is required'),
   body('company')
-    .notEmpty()
     .trim()
-    .isLength({ min: 2, max: 100 })
-    .withMessage('Company name must be between 2 and 100 characters'),
-  
+    .notEmpty()
+    .withMessage('Company name is required'),
   body('location')
-    .notEmpty()
     .trim()
-    .isLength({ min: 2, max: 100 })
-    .withMessage('Location must be between 2 and 100 characters'),
-  
+    .notEmpty()
+    .withMessage('Location is required'),
   body('experienceLevel')
-    .notEmpty()
     .trim()
-    .isIn(['Entry-Level', 'Mid-Level', 'Senior', 'Lead'])
-    .withMessage('Invalid experience level'),
-  
+    .notEmpty()
+    .withMessage('Experience level is required'),
   body('category')
-    .notEmpty()
     .trim()
-    .isLength({ min: 2, max: 50 })
-    .withMessage('Category must be between 2 and 50 characters'),
-  
+    .notEmpty()
+    .withMessage('Category is required'),
   body('salary')
     .optional()
-    .isFloat({ min: 0 })
-    .withMessage('Salary must be a positive number'),
-  validateResults
+    .isNumeric()
+    .withMessage('Salary must be a number')
+];
+
+export const validateApplication = [
+  body('jobId')
+    .trim()
+    .notEmpty()
+    .withMessage('Job ID is required'),
+  body('coverLetter')
+    .trim()
+    .notEmpty()
+    .withMessage('Cover letter is required')
+    .isLength({ min: 100 })
+    .withMessage('Cover letter must be at least 100 characters long'),
+  body('resume')
+    .trim()
+    .notEmpty()
+    .withMessage('Resume link is required')
+    .isURL()
+    .withMessage('Resume must be a valid URL')
 ];
 
 function validateResults(req: Request, res: Response, next: NextFunction) {

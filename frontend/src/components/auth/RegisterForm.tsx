@@ -87,8 +87,8 @@ export const RegisterForm = () => {
               message: 'Password must be at least 8 characters'
             },
             pattern: {
-              value: /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/,
-              message: 'Password must contain at least one uppercase letter, one lowercase letter, and one number'
+              value: /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)[A-Za-z\d]{8,}$/,
+              message: 'Password must be at least 8 characters long and contain at least one uppercase letter, one lowercase letter, and one number'
             }
           })}
           className="appearance-none rounded-md relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
