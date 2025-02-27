@@ -1,7 +1,8 @@
 import { Router } from 'express';
-import { authController } from '../controllers/auth.controller';
+import authController from '../controllers/auth.controller';
 import { validateRegistration, validateLogin } from '../middleware/validation.middleware';
 import { authenticate } from '../middleware/auth.middleware';
+import { authLimiter, refreshTokenLimiter } from '../middleware/rate-limit.middleware';
 
 const router = Router();
 
@@ -74,7 +75,7 @@ const router = Router();
  *       400:
  *         description: Invalid input or email already exists
  */
-router.post('/register', validateRegistration, authController.register);
+router.post('/register', authLimiter, validateRegistration, authController.register);
 
 /**
  * @swagger
@@ -119,7 +120,7 @@ router.post('/register', validateRegistration, authController.register);
  *       429:
  *         description: Too many login attempts
  */
-router.post('/login', validateLogin, authController.login);
+router.post('/login', authLimiter, validateLogin, authController.login);
 
 /**
  * @swagger
@@ -148,7 +149,7 @@ router.get('/me', authenticate, authController.getProfile);
 
 // Protected routes
 router.use(authenticate);
-router.post('/refresh', authController.refresh);
+router.post('/refresh', refreshTokenLimiter, authController.refresh);
 router.post('/logout', authController.logout);
 router.get('/verify', authController.verifyToken);
 

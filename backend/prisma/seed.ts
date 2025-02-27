@@ -1,67 +1,114 @@
-import { PrismaClient } from '@prisma/client';
-import bcrypt from 'bcrypt';
+import { PrismaClient, UserRole } from '@prisma/client';
+import bcrypt from 'bcryptjs';
 
 const prisma = new PrismaClient();
 
 async function main() {
-  console.log('Seeding database...');
+  // Clean up existing data
+  await prisma.job.deleteMany();
+  await prisma.profile.deleteMany();
+  await prisma.user.deleteMany();
 
   // Create admin user
-  const adminPassword = await bcrypt.hash('Admin123!', 10);
-  const admin = await prisma.user.upsert({
-    where: { email: 'admin@jobboard.com' },
-    update: {},
-    create: {
-      email: 'admin@jobboard.com',
+  const adminPassword = await bcrypt.hash('admin123', 10);
+  const admin = await prisma.user.create({
+    data: {
+      email: 'admin@example.com',
       password: adminPassword,
       name: 'Admin User',
-      role: 'ADMIN',
+      role: UserRole.ADMIN,
+      isActive: true,
       profile: {
-        create: {}
+        create: {
+          fullName: 'Admin User'
+        }
       }
     }
   });
-  console.log('Admin user created:', admin);
 
-  // Seed initial jobs
-  console.log('Seeding initial jobs...');
-  await prisma.job.createMany({
-    data: [
-      {
-        title: 'Senior Software Engineer',
-        description: 'We are looking for an experienced software engineer...',
-        company: 'Tech Corp',
-        location: 'Remote',
-        experienceLevel: 'Senior',
-        category: 'Engineering',
-        salary: 120000
-      },
-      {
-        title: 'Product Manager',
-        description: 'Join our product team to lead exciting initiatives...',
-        company: 'Innovation Inc',
-        location: 'New York',
-        experienceLevel: 'Mid-Level',
-        category: 'Product',
-        salary: 100000
-      },
-      {
-        title: 'UX Designer',
-        description: 'Help us create beautiful and intuitive interfaces...',
-        company: 'Design Studio',
-        location: 'San Francisco',
-        experienceLevel: 'Junior',
-        category: 'Design',
-        salary: 80000
+  // Create company user
+  const companyPassword = await bcrypt.hash('company123', 10);
+  const company = await prisma.user.create({
+    data: {
+      email: 'company@example.com',
+      password: companyPassword,
+      name: 'Tech Corp',
+      role: UserRole.COMPANY,
+      isActive: true,
+      profile: {
+        create: {
+          fullName: 'Tech Corp'
+        }
       }
-    ]
+    }
   });
-  console.log('Jobs seeded successfully');
+
+  // Create regular user
+  const userPassword = await bcrypt.hash('user123', 10);
+  const user = await prisma.user.create({
+    data: {
+      email: 'user@example.com',
+      password: userPassword,
+      name: 'John Doe',
+      role: UserRole.USER,
+      isActive: true,
+      profile: {
+        create: {
+          fullName: 'John Doe'
+        }
+      }
+    }
+  });
+
+  // Create jobs
+  await prisma.job.create({
+    data: {
+      title: 'Senior Frontend Developer',
+      description: 'We are looking for an experienced Frontend Developer...',
+      location: 'Remote',
+      salary: 120000,
+      employmentType: 'FULL_TIME',
+      remote: true,
+      experienceLevel: 'SENIOR',
+      category: 'ENGINEERING',
+      companyId: company.id
+    }
+  });
+
+  await prisma.job.create({
+    data: {
+      title: 'Product Manager',
+      description: 'Seeking a talented Product Manager to join our team...',
+      location: 'New York, NY',
+      salary: 130000,
+      employmentType: 'FULL_TIME',
+      remote: false,
+      experienceLevel: 'MID_LEVEL',
+      category: 'PRODUCT',
+      companyId: company.id
+    }
+  });
+
+  await prisma.job.create({
+    data: {
+      title: 'UI/UX Designer',
+      description: 'Join our design team to create beautiful user experiences...',
+      location: 'San Francisco, CA',
+      salary: 100000,
+      employmentType: 'FULL_TIME',
+      remote: true,
+      experienceLevel: 'JUNIOR',
+      category: 'DESIGN',
+      companyId: company.id
+    }
+  });
+
+  console.log('Seed data created successfully');
 }
 
 main()
   .catch((e) => {
-    console.error(e);
+    console.error('Error seeding database:', e);
     process.exit(1);
   })
   .finally(async () => {

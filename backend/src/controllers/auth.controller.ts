@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient, UserRole } from '@prisma/client';
 import { 
   hashPassword, 
   comparePasswords, 
@@ -10,8 +10,18 @@ import {
 } from '../utils/auth.utils';
 import { AppError } from '../middleware/error.middleware';
 import { AuthenticatedRequest } from '../types';
+import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
+import { generateToken } from '../utils/jwt';
 
 const prisma = new PrismaClient();
+
+interface AuthRequest extends Request {
+  user?: {
+    id: string;
+    role: UserRole;
+  };
+}
 
 const COOKIE_OPTIONS = {
   httpOnly: true,
@@ -21,70 +31,86 @@ const COOKIE_OPTIONS = {
   path: '/'
 } as const;
 
-export const authController = {
+const authController = {
   async register(req: Request, res: Response) {
     try {
-      const { email, password, name } = req.body;
+      const { email, password, name, role = UserRole.USER } = req.body;
 
-      // Validate email
-      if (!email || !email.includes('@')) {
-        throw new AppError(400, 'Invalid email address');
+      // Validate input
+      if (!email || !password || !name) {
+        return res.status(400).json({
+          success: false,
+          message: 'Please provide all required fields'
+        });
       }
 
-      // Validate password
-      const passwordValidation = validatePassword(password);
-      if (!passwordValidation.isValid) {
-        throw new AppError(400, passwordValidation.message);
-      }
+      // Check if user already exists
+      const existingUser = await prisma.user.findUnique({
+        where: { email }
+      });
 
-      const existingUser = await prisma.user.findUnique({ where: { email } });
       if (existingUser) {
-        throw new AppError(400, 'Email already registered');
+        return res.status(400).json({
+          success: false,
+          message: 'User already exists'
+        });
       }
 
-      const hashedPassword = await hashPassword(password);
+      // Hash password
+      const hashedPassword = await bcrypt.hash(password, 10);
+
+      // Create user
       const user = await prisma.user.create({
         data: {
           email,
           password: hashedPassword,
           name,
+          role,
           profile: {
-            create: {} // Create empty profile
+            create: {
+              fullName: name
+            }
           }
         },
-        select: {
-          id: true,
-          email: true,
-          name: true,
-          role: true
+        include: {
+          profile: true
         }
       });
 
-      const accessToken = generateAccessToken(user);
-      const refreshToken = generateRefreshToken(user);
+      // Generate tokens
+      const accessToken = generateToken(user.id, user.role, '15m', false);
+      const refreshToken = generateToken(user.id, user.role, '7d', true);
 
-      // Set refresh token in HTTP-only cookie
-      res.cookie('refresh_token', refreshToken, COOKIE_OPTIONS);
+      // Set cookies
+      res.cookie('access_token', accessToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax',
+        maxAge: 15 * 60 * 1000 // 15 minutes
+      });
 
-      res.status(201).json({ 
+      res.cookie('refresh_token', refreshToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax',
+        path: '/api/auth/refresh', // Restrict refresh token to refresh endpoint
+        maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+      });
+
+      // Remove password from response
+      const { password: _, ...userWithoutPassword } = user;
+
+      return res.status(201).json({
         success: true,
-        data: {
-          user,
-          token: accessToken
-        }
+        message: 'User registered successfully',
+        user: userWithoutPassword
       });
     } catch (error) {
-      if (error instanceof AppError) {
-        res.status(error.statusCode).json({ 
-          success: false,
-          message: error.message 
-        });
-      } else {
-        res.status(500).json({ 
-          success: false,
-          message: 'Error creating user' 
-        });
-      }
+      console.error('Register error:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Internal server error'
+      });
     }
   },
 
@@ -92,149 +118,191 @@ export const authController = {
     try {
       const { email, password } = req.body;
 
+      // Validate input
       if (!email || !password) {
-        throw new AppError(400, 'Email and password are required');
+        return res.status(400).json({
+          success: false,
+          message: 'Please provide email and password'
+        });
       }
 
-      const user = await prisma.user.findUnique({ 
+      // Find user
+      const user = await prisma.user.findUnique({
         where: { email },
-        select: {
-          id: true,
-          email: true,
-          name: true,
-          role: true,
-          password: true
+        include: {
+          profile: true
         }
       });
 
       if (!user) {
-        throw new AppError(401, 'Invalid credentials');
+        return res.status(401).json({
+          success: false,
+          message: 'Invalid credentials'
+        });
       }
 
-      const isValidPassword = await comparePasswords(password, user.password);
+      // Check if user is active
+      if (!user.isActive) {
+        return res.status(401).json({
+          success: false,
+          message: 'Account is inactive'
+        });
+      }
+
+      // Verify password
+      const isValidPassword = await bcrypt.compare(password, user.password);
       if (!isValidPassword) {
-        throw new AppError(401, 'Invalid credentials');
+        return res.status(401).json({
+          success: false,
+          message: 'Invalid credentials'
+        });
       }
 
+      // Generate tokens
+      const accessToken = generateToken(user.id, user.role, '15m', false);
+      const refreshToken = generateToken(user.id, user.role, '7d', true);
+
+      // Set cookies
+      res.cookie('access_token', accessToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax',
+        maxAge: 15 * 60 * 1000 // 15 minutes
+      });
+
+      res.cookie('refresh_token', refreshToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax',
+        path: '/api/auth/refresh', // Restrict refresh token to refresh endpoint
+        maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+      });
+
+      // Remove password from response
       const { password: _, ...userWithoutPassword } = user;
-      const accessToken = generateAccessToken(userWithoutPassword);
-      const refreshToken = generateRefreshToken(userWithoutPassword);
 
-      // Set refresh token in HTTP-only cookie
-      res.cookie('refresh_token', refreshToken, COOKIE_OPTIONS);
-
-      res.json({
+      return res.status(200).json({
         success: true,
-        data: {
-          user: userWithoutPassword,
-          token: accessToken
-        }
+        message: 'Login successful',
+        user: userWithoutPassword
       });
     } catch (error) {
-      if (error instanceof AppError) {
-        res.status(error.statusCode).json({ 
-          success: false,
-          message: error.message 
-        });
-      } else {
-        res.status(500).json({ 
-          success: false,
-          message: 'Error during login' 
-        });
-      }
+      console.error('Login error:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Internal server error'
+      });
     }
   },
 
   async refresh(req: Request, res: Response) {
     try {
-      const refreshToken = req.cookies['refresh_token'];
-      
+      const refreshToken = req.cookies.refresh_token;
+
       if (!refreshToken) {
-        throw new AppError(401, 'Refresh token required');
+        return res.status(401).json({
+          success: false,
+          message: 'No refresh token provided'
+        });
       }
 
-      const decoded = verifyToken(refreshToken, true);
-      const user = await prisma.user.findUnique({ 
-        where: { id: decoded.id },
-        select: {
-          id: true,
-          email: true,
-          name: true,
-          role: true
-        }
-      });
+      try {
+        // Verify refresh token specifically
+        const decoded = verifyToken(refreshToken, true);
+        
+        // Check if user exists
+        const user = await prisma.user.findUnique({
+          where: { id: decoded.id }
+        });
 
-      if (!user) {
-        throw new AppError(401, 'User not found');
+        if (!user) {
+          res.clearCookie('access_token');
+          res.clearCookie('refresh_token', { path: '/api/auth/refresh' });
+          return res.status(401).json({
+            success: false,
+            message: 'User not found'
+          });
+        }
+
+        // Generate new tokens with proper flags
+        const newAccessToken = generateToken(user.id, user.role, '15m', false);
+        const newRefreshToken = generateToken(user.id, user.role, '7d', true);
+
+        // Set new cookies
+        res.cookie('access_token', newAccessToken, {
+          httpOnly: true,
+          secure: process.env.NODE_ENV === 'production',
+          sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax',
+          maxAge: 15 * 60 * 1000 // 15 minutes
+        });
+
+        res.cookie('refresh_token', newRefreshToken, {
+          httpOnly: true,
+          secure: process.env.NODE_ENV === 'production',
+          sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax',
+          path: '/api/auth/refresh', // Restrict refresh token to refresh endpoint
+          maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+        });
+
+        // Return success with user data
+        const userData = { ...user };
+        delete userData.password;
+
+        return res.status(200).json({
+          success: true,
+          data: {
+            user: userData,
+            token: newAccessToken
+          }
+        });
+
+      } catch (tokenError: any) {
+        // Clear cookies on token verification failure
+        res.clearCookie('access_token');
+        res.clearCookie('refresh_token', { path: '/api/auth/refresh' });
+        return res.status(401).json({
+          success: false,
+          message: tokenError.message || 'Invalid refresh token'
+        });
       }
-
-      const accessToken = generateAccessToken(user);
-      const newRefreshToken = generateRefreshToken(user);
-
-      res.cookie('refresh_token', newRefreshToken, COOKIE_OPTIONS);
-
-      res.json({
-        success: true,
-        data: {
-          user,
-          token: accessToken
-        }
-      });
     } catch (error) {
-      console.error('Refresh token error:', error);
-      res.clearCookie('refresh_token', {
-        ...COOKIE_OPTIONS,
-        maxAge: 0
+      console.error('Refresh error:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Internal server error'
       });
-      if (error instanceof AppError) {
-        res.status(error.statusCode).json({ 
-          success: false,
-          message: error.message 
-        });
-      } else {
-        res.status(401).json({ 
-          success: false,
-          message: 'Invalid refresh token' 
-        });
-      }
     }
   },
 
   async logout(req: Request, res: Response) {
     try {
-      // Clear the refresh token cookie
-      res.clearCookie('refresh_token', {
-        ...COOKIE_OPTIONS,
-        maxAge: 0
-      });
+      // Clear cookies
+      res.clearCookie('access_token');
+      res.clearCookie('refresh_token');
 
-      // Send success response
-      res.status(200).json({
+      return res.status(200).json({
         success: true,
         message: 'Logged out successfully'
       });
     } catch (error) {
       console.error('Logout error:', error);
-      res.status(500).json({
+      return res.status(500).json({
         success: false,
-        message: 'Error during logout'
+        message: 'Internal server error'
       });
     }
   },
 
-  async getProfile(req: AuthenticatedRequest, res: Response) {
+  async getProfile(req: AuthRequest, res: Response) {
     try {
       // User is already verified and attached by the authenticate middleware
       const { user } = req;
 
       const userWithProfile = await prisma.user.findUnique({
         where: { id: user.id },
-        select: {
-          id: true,
-          email: true,
-          name: true,
-          role: true,
-          profile: true
+        include: {
+          profile: true,
+          jobs: true
         }
       });
 
@@ -284,5 +352,46 @@ export const authController = {
         });
       }
     }
+  },
+
+  async me(req: AuthRequest, res: Response) {
+    try {
+      if (!req.user) {
+        return res.status(401).json({
+          success: false,
+          message: 'Not authenticated'
+        });
+      }
+
+      const user = await prisma.user.findUnique({
+        where: { id: req.user.id },
+        include: {
+          profile: true
+        }
+      });
+
+      if (!user) {
+        return res.status(404).json({
+          success: false,
+          message: 'User not found'
+        });
+      }
+
+      // Remove password from response
+      const { password: _, ...userWithoutPassword } = user;
+
+      return res.status(200).json({
+        success: true,
+        user: userWithoutPassword
+      });
+    } catch (error) {
+      console.error('Me error:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Internal server error'
+      });
+    }
   }
 };
+
+export default authController;

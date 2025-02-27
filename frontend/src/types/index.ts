@@ -33,7 +33,7 @@ export interface User {
   id: string;
   name: string;
   email: string;
-  role: 'USER' | 'ADMIN';
+  role: 'USER' | 'ADMIN' | 'COMPANY';
   isActive: boolean;
   _count?: {
     applications: number;

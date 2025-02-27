@@ -1,4 +1,4 @@
-import { Router, Request, Response } from 'express';
+import { Router, Request, Response, NextFunction } from 'express';
 import { authenticate, requireAdmin } from '../middleware/auth.middleware';
 import { prisma } from '../config/prisma';
 import { Application, Job, Prisma, User, UserRole } from '@prisma/client';
@@ -6,9 +6,49 @@ import { AuthenticatedRequest } from '../types';
 import { subDays, format } from 'date-fns';
 import { validateJobCreation } from '../middleware/validation.middleware';
 import { adminController } from '../controllers/admin.controller';
-import { emailTemplateController } from '../controllers/emailTemplate.controller';
 
 const router = Router();
+
+// Error handler middleware for admin routes
+const adminErrorHandler = (err: any, req: Request, res: Response, next: NextFunction) => {
+  console.error('Admin route error:', err);
+
+  if (err.name === 'UnauthorizedError') {
+    return res.status(401).json({
+      success: false,
+      message: 'Authentication required'
+    });
+  }
+
+  if (err.name === 'ForbiddenError') {
+    return res.status(403).json({
+      success: false,
+      message: 'Admin access required'
+    });
+  }
+
+  if (err.name === 'PrismaClientValidationError') {
+    return res.status(400).json({
+      success: false,
+      message: 'Invalid data provided'
+    });
+  }
+
+  if (err.name === 'PrismaClientKnownRequestError') {
+    return res.status(400).json({
+      success: false,
+      message: 'Database operation failed'
+    });
+  }
+
+  return res.status(500).json({
+    success: false,
+    message: 'Internal server error'
+  });
+};
+
+// Apply authentication and admin check to all routes
+router.use(authenticate, requireAdmin);
 
 interface ActivityWithRelations extends Application {
   user: User;
@@ -59,10 +99,16 @@ interface ActivityWithRelations extends Application {
  *       403:
  *         description: Forbidden - Admin access required
  */
-router.get('/stats', authenticate, requireAdmin, adminController.getDashboardStats);
+router.get('/stats', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    await adminController.getDashboardStats(req, res);
+  } catch (error) {
+    next(error);
+  }
+});
 
 // Get analytics data
-router.get('/analytics', authenticate, requireAdmin, async (req: Request, res: Response) => {
+router.get('/analytics', async (req: Request, res: Response, next: NextFunction) => {
   try {
     // Get applications by day for the last 7 days
     const last7Days = Array.from({ length: 7 }, (_, i) => {
@@ -132,11 +178,7 @@ router.get('/analytics', authenticate, requireAdmin, async (req: Request, res: R
       },
     });
   } catch (error) {
-    console.error('Error fetching analytics:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to fetch analytics data'
-    });
+    next(error);
   }
 });
 
@@ -189,10 +231,16 @@ router.get('/analytics', authenticate, requireAdmin, async (req: Request, res: R
  *       403:
  *         description: Forbidden - Admin access required
  */
-router.get('/users', authenticate, requireAdmin, adminController.getAllUsers);
+router.get('/users', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    await adminController.getAllUsers(req, res);
+  } catch (error) {
+    next(error);
+  }
+});
 
 // Update user
-router.put('/users/:id', authenticate, requireAdmin, async (req: Request, res: Response) => {
+router.put('/users/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
     const { role, isActive } = req.body as { role: UserRole; isActive: boolean };
@@ -219,16 +267,12 @@ router.put('/users/:id', authenticate, requireAdmin, async (req: Request, res: R
       data: user
     });
   } catch (error) {
-    console.error('Error updating user:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to update user'
-    });
+    next(error);
   }
 });
 
 // Delete user
-router.delete('/users/:id', authenticate, requireAdmin, async (req: Request, res: Response) => {
+router.delete('/users/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
 
@@ -241,11 +285,7 @@ router.delete('/users/:id', authenticate, requireAdmin, async (req: Request, res
       message: 'User deleted successfully'
     });
   } catch (error) {
-    console.error('Error deleting user:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to delete user'
-    });
+    next(error);
   }
 });
 
@@ -304,10 +344,16 @@ router.delete('/users/:id', authenticate, requireAdmin, async (req: Request, res
  *       403:
  *         description: Forbidden - Admin access required
  */
-router.get('/applications', authenticate, requireAdmin, adminController.getAllApplications);
+router.get('/applications', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    await adminController.getAllApplications(req, res);
+  } catch (error) {
+    next(error);
+  }
+});
 
 // Update application status
-router.patch('/applications/:id/status', authenticate, requireAdmin, async (req: Request, res: Response) => {
+router.patch('/applications/:id/status', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
     const { status } = req.body;
@@ -332,16 +378,12 @@ router.patch('/applications/:id/status', authenticate, requireAdmin, async (req:
       data: application
     });
   } catch (error) {
-    console.error('Error updating application status:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to update application status'
-    });
+    next(error);
   }
 });
 
 // Get all jobs (admin)
-router.get('/jobs', authenticate, requireAdmin, async (req: Request, res: Response) => {
+router.get('/jobs', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const jobs = await prisma.job.findMany({
       orderBy: {
@@ -361,16 +403,12 @@ router.get('/jobs', authenticate, requireAdmin, async (req: Request, res: Respon
       data: jobs
     });
   } catch (error) {
-    console.error('Error fetching jobs:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to fetch jobs'
-    });
+    next(error);
   }
 });
 
 // Create new job (admin)
-router.post('/jobs', authenticate, requireAdmin, validateJobCreation, async (req: Request, res: Response) => {
+router.post('/jobs', validateJobCreation, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const jobData = req.body;
     
@@ -388,16 +426,12 @@ router.post('/jobs', authenticate, requireAdmin, validateJobCreation, async (req
       message: 'Job created successfully'
     });
   } catch (error) {
-    console.error('Error creating job:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to create job'
-    });
+    next(error);
   }
 });
 
 // Update job (admin)
-router.put('/jobs/:id', authenticate, requireAdmin, validateJobCreation, async (req: Request, res: Response) => {
+router.put('/jobs/:id', validateJobCreation, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
     const jobData = req.body;
@@ -412,16 +446,12 @@ router.put('/jobs/:id', authenticate, requireAdmin, validateJobCreation, async (
       data: job
     });
   } catch (error) {
-    console.error('Error updating job:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to update job'
-    });
+    next(error);
   }
 });
 
 // Delete job (admin)
-router.delete('/jobs/:id', authenticate, requireAdmin, async (req: Request, res: Response) => {
+router.delete('/jobs/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
     
@@ -434,17 +464,11 @@ router.delete('/jobs/:id', authenticate, requireAdmin, async (req: Request, res:
       message: 'Job deleted successfully'
     });
   } catch (error) {
-    console.error('Error deleting job:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to delete job'
-    });
+    next(error);
   }
 });
 
-router.get('/email-templates', authenticate, requireAdmin, emailTemplateController.getAll);
-router.post('/email-templates', authenticate, requireAdmin, emailTemplateController.create);
-router.put('/email-templates/:id', authenticate, requireAdmin, emailTemplateController.update);
-router.delete('/email-templates/:id', authenticate, requireAdmin, emailTemplateController.delete);
+// Apply error handler
+router.use(adminErrorHandler);
 
 export { router as adminRoutes };

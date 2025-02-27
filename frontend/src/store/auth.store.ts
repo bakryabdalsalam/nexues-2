@@ -2,7 +2,6 @@ import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import { User } from '../types';
 import { authApi } from '../services/api';
-import { toast } from 'react-toastify';
 
 interface AuthState {
   user: User | null;
@@ -80,16 +79,14 @@ export const useAuthStore = create<AuthState>()(
           console.log('Refreshing token...');
           const response = await authApi.refresh();
           if (response?.data?.token) {
-            const { token, user } = response.data;
+            const { token } = response.data;
             localStorage.setItem('token', token);
-            set({ token, user, isAuthenticated: true });
+            set({ token, isAuthenticated: true });
             return token;
           }
           throw new Error('No token in refresh response');
-        } catch (error: any) {
+        } catch (error) {
           console.error('Error refreshing token:', error);
-          const errorMessage = error?.response?.data?.message || 'Session expired';
-          toast.error(errorMessage);
           get().logout();
           return null;
         }
@@ -108,38 +105,29 @@ export const useAuthStore = create<AuthState>()(
           }
 
           // Try to get user profile to validate token
-          try {
-            const response = await authApi.getProfile();
-            if (response?.data) {
-              set({ 
-                user: response.data,
-                token,
-                isAuthenticated: true,
-                isLoading: false
-              });
-              return true;
-            }
-          } catch (error: any) {
-            if (error?.response?.status === 401) {
-              // Try token refresh on 401
-              const newToken = await get().refreshToken();
-              if (!newToken) {
-                toast.error('Your session has expired. Please login again.');
-                get().logout();
-                return false;
-              }
-              return true;
-            }
-            throw error;
+          const response = await authApi.getProfile();
+          console.log('Profile response:', response);
+          
+          if (response?.data) {
+            set({ 
+              user: response.data,
+              token,
+              isAuthenticated: true,
+              isLoading: false
+            });
+            return true;
           }
           
           throw new Error('Invalid profile response');
-        } catch (error: any) {
+        } catch (error) {
           console.error('Error checking auth:', error);
-          const errorMessage = error?.response?.data?.message || error?.message || 'Authentication failed';
-          toast.error(errorMessage);
-          get().logout();
-          return false;
+          // Try to refresh token
+          const newToken = await get().refreshToken();
+          if (!newToken) {
+            get().logout();
+            return false;
+          }
+          return true;
         } finally {
           set({ isLoading: false });
         }

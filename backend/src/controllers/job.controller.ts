@@ -1,120 +1,144 @@
 import { Request, Response } from 'express';
-import { db } from '../services/database.service';
-import { PrismaClient, Prisma } from '@prisma/client';
+import { PrismaClient, UserRole, Prisma, JobCategory, ExperienceLevel, EmploymentType } from '@prisma/client';
+import { prisma } from '../config/prisma';
 import { AuthenticatedRequest } from '../types';
 import { AppError } from '../middleware/error.middleware';
 
-const prisma = new PrismaClient();
-
+// Remove the local AuthRequest interface since we're importing it from types
 export const jobController = {
-  getJobs: async (req: Request, res: Response) => {
+  getAllJobs: async (req: Request, res: Response) => {
     try {
-      const page = parseInt(req.query.page as string) || 1;
-      const limit = parseInt(req.query.limit as string) || 10;
-      const skip = (page - 1) * limit;
-
-      // Extract search filters from query params
+      console.log('Received job search request:', req.query);
+      
       const {
-        keyword,
-        location,
+        search,
         category,
+        location,
+        remote,
         experienceLevel,
-        salary_min,
-        salary_max,
-        employmentType,
-        remote
+        page = '1',
+        limit = '10'
       } = req.query;
 
-      // Build where clause based on filters
+      const pageNum = parseInt(page as string);
+      const limitNum = parseInt(limit as string);
+      const skip = (pageNum - 1) * limitNum;
+
       const where: any = {};
+      const conditions: any[] = [];
 
-      if (keyword) {
-        where.OR = [
-          { title: { contains: keyword as string, mode: 'insensitive' } },
-          { description: { contains: keyword as string, mode: 'insensitive' } },
-          { company: { contains: keyword as string, mode: 'insensitive' } }
-        ];
-      }
-
-      if (location) {
-        where.location = { equals: location as string };
+      if (search) {
+        conditions.push({
+          OR: [
+            { title: { contains: search as string, mode: 'insensitive' } },
+            { description: { contains: search as string, mode: 'insensitive' } }
+          ]
+        });
       }
 
       if (category) {
-        where.category = { equals: category as string };
+        conditions.push({ category: category as JobCategory });
+      }
+
+      if (location) {
+        conditions.push({ location: { contains: location as string, mode: 'insensitive' } });
+      }
+
+      if (remote) {
+        conditions.push({ remote: remote === 'true' });
       }
 
       if (experienceLevel) {
-        where.experienceLevel = { equals: experienceLevel as string };
+        conditions.push({ experienceLevel: experienceLevel as ExperienceLevel });
       }
 
-      if (salary_min || salary_max) {
-        where.salary = {};
-        if (salary_min) where.salary.gte = parseInt(salary_min as string);
-        if (salary_max) where.salary.lte = parseInt(salary_max as string);
+      if (conditions.length > 0) {
+        where.AND = conditions;
       }
 
-      if (employmentType) {
-        where.employmentType = { equals: employmentType as string };
-      }
+      // Add status filter to only show active jobs
+      where.status = 'OPEN';
 
-      if (remote !== undefined) {
-        where.remote = remote === 'true';
-      }
+      console.log('Executing query with params:', { where, skip, take: limitNum });
 
       const [jobs, total] = await Promise.all([
-        db.job.findMany({
+        prisma.job.findMany({
           where,
-          skip,
-          take: limit,
-          orderBy: { createdAt: 'desc' },
-          select: {
-            id: true,
-            title: true,
-            description: true,
-            company: true,
-            location: true,
-            experienceLevel: true,
-            category: true,
-            salary: true,
-            createdAt: true,
-            updatedAt: true,
+          include: {
+            company: {
+              select: {
+                id: true,
+                name: true,
+                profile: {
+                  select: {
+                    avatar: true,
+                    address: true
+                  }
+                }
+              }
+            },
             _count: {
-              select: { applications: true }
+              select: {
+                applications: true
+              }
             }
-          }
+          },
+          orderBy: {
+            createdAt: "desc"
+          },
+          skip,
+          take: limitNum
         }),
-        db.job.count({ where })
+        prisma.job.count({ where })
       ]);
+
+      console.log(`Found ${jobs.length} jobs out of ${total} total`);
+
+      const totalPages = Math.ceil(total / limitNum);
+
+      // Transform the jobs to include proper company information
+      const transformedJobs = jobs.map(job => ({
+        ...job,
+        company: {
+          ...job.company,
+          companyName: job.company.name,
+          location: job.company.profile?.address || 'Remote',
+          logo: job.company.profile?.avatar
+        }
+      }));
 
       res.json({
         success: true,
-        data: jobs,
-        pagination: {
-          page,
-          limit,
-          total,
-          pages: Math.ceil(total / limit)
+        data: {
+          jobs: transformedJobs,
+          pagination: {
+            total,
+            page: pageNum,
+            totalPages,
+            hasMore: pageNum < totalPages
+          }
         }
       });
     } catch (error) {
-      console.error('Error fetching jobs:', error);
-      res.status(500).json({ 
+      console.error('Get jobs error:', error);
+      res.status(500).json({
         success: false,
-        message: 'Error fetching jobs',
-        error: error instanceof Error ? error.message : 'Unknown error'
+        message: 'Error fetching jobs'
       });
     }
   },
 
-  getJob: async (req: Request, res: Response) => {
+  getJobById: async (req: Request, res: Response) => {
     try {
       const { id } = req.params;
-      const job = await db.job.findUnique({
+
+      const job = await prisma.job.findUnique({
         where: { id },
         include: {
-          _count: {
-            select: { applications: true }
+          company: {
+            include: {
+              profile: true
+            }
           }
         }
       });
@@ -131,7 +155,7 @@ export const jobController = {
         data: job
       });
     } catch (error) {
-      console.error('Error fetching job:', error);
+      console.error('Get job error:', error);
       res.status(500).json({
         success: false,
         message: 'Error fetching job'
@@ -139,82 +163,240 @@ export const jobController = {
     }
   },
 
-  createJob: async (req: Request, res: Response) => {
+  getSimilarJobs: async (req: Request, res: Response) => {
     try {
-      const job = await db.job.create({
-        data: {
-          title: req.body.title,
-          description: req.body.description,
-          company: req.body.company,
-          location: req.body.location,
-          experienceLevel: req.body.experienceLevel,
-          category: req.body.category,
-          salary: req.body.salary ? parseFloat(req.body.salary) : null,
-          remote: req.body.remote || false
+      const { id } = req.params;
+      const job = await prisma.job.findUnique({
+        where: { id },
+        select: {
+          category: true,
+          experienceLevel: true,
+          company: {
+            select: {
+              id: true,
+            },
+          },
+        },
+      });
+
+      if (!job) {
+        return res.status(404).json({ message: 'Job not found' });
+      }
+
+      const similarJobs = await prisma.job.findMany({
+        where: {
+          OR: [
+            { category: job.category },
+            { experienceLevel: job.experienceLevel },
+          ],
+          id: { not: id }, // Exclude current job
+          status: 'OPEN'   // Only include open jobs
+        },
+        include: {
+          company: {
+            select: {
+              id: true,
+              name: true,       // This is the company name
+              profile: {        // Get additional company info from profile
+                select: {
+                  avatar: true, // This will serve as the logo
+                  address: true // This will serve as the location
+                }
+              }
+            }
+          },
+          _count: {
+            select: {
+              applications: true
+            }
+          }
+        },
+        take: 5,
+        orderBy: {
+          createdAt: 'desc'
         }
       });
+
+      // Transform the data to match the expected format
+      const transformedJobs = similarJobs.map(job => ({
+        ...job,
+        company: {
+          companyName: job.company.name,
+          location: job.company.profile?.address || 'Remote',
+          logo: job.company.profile?.avatar || null
+        }
+      }));
+
+      res.json({
+        success: true,
+        data: transformedJobs
+      });
+    } catch (error) {
+      console.error('Get similar jobs error:', error);
+      res.status(500).json({ message: 'Error fetching similar jobs' });
+    }
+  },
+
+  getJobStats: async (req: Request, res: Response) => {
+    try {
+      const [
+        totalJobs,
+        categoryStats,
+        locationStats,
+      ] = await Promise.all([
+        prisma.job.count(),
+        prisma.job.groupBy({
+          by: ['category'],
+          _count: true,
+        }),
+        prisma.job.groupBy({
+          by: ['location'],
+          _count: true,
+        }),
+      ]);
+
+      res.json({
+        totalJobs,
+        categoryStats,
+        locationStats,
+      });
+    } catch (error) {
+      console.error('Get job stats error:', error);
+      res.status(500).json({ message: 'Error fetching job statistics' });
+    }
+  },
+
+  createJob: async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const {
+        title,
+        description,
+        location,
+        experienceLevel,
+        category,
+        salary,
+        remote,
+        employmentType,
+        requirements = [],
+        benefits = []
+      } = req.body;
+
+      const job = await prisma.job.create({
+        data: {
+          title,
+          description,
+          location,
+          experienceLevel: experienceLevel as ExperienceLevel,
+          category: category as JobCategory,
+          salary: parseInt(salary),
+          remote: remote || false,
+          employmentType: employmentType as EmploymentType,
+          requirements,
+          benefits,
+          companyId: req.user.id
+        },
+        select: {
+          id: true,
+          title: true,
+          description: true,
+          location: true,
+          salary: true,
+          remote: true,
+          experienceLevel: true,
+          category: true,
+          requirements: true,
+          benefits: true,
+          createdAt: true,
+          company: {
+            select: {
+              id: true,
+              name: true,
+              profile: {
+                select: {
+                  avatar: true
+                }
+              }
+            }
+          }
+        }
+      });
+
       res.status(201).json({
         success: true,
         data: job
       });
     } catch (error) {
       console.error('Error creating job:', error);
-      res.status(500).json({
+      res.status(500).json({ 
         success: false,
-        message: 'Error creating job'
+        message: 'Error creating job' 
       });
     }
   },
 
-  updateJob: async (req: Request, res: Response) => {
+  updateJob: async (req: AuthenticatedRequest, res: Response) => {
     try {
       const { id } = req.params;
-      const job = await db.job.update({
+      const {
+        title,
+        description,
+        location,
+        experienceLevel,
+        category,
+        salary,
+        remote,
+        employmentType
+      } = req.body;
+
+      const job = await prisma.job.update({
         where: { id },
         data: {
-          title: req.body.title,
-          description: req.body.description,
-          company: req.body.company,
-          location: req.body.location,
-          experienceLevel: req.body.experienceLevel,
-          category: req.body.category,
-          salary: req.body.salary ? parseFloat(req.body.salary) : null,
-          remote: req.body.remote || undefined
+          title,
+          description,
+          location,
+          experienceLevel,
+          category,
+          salary: parseInt(salary),
+          remote,
+          employmentType
+        },
+        include: {
+          company: {
+            include: {
+              profile: true
+            }
+          }
         }
       });
+
       res.json({
         success: true,
         data: job
       });
     } catch (error) {
       console.error('Error updating job:', error);
-      res.status(500).json({
+      res.status(500).json({ 
         success: false,
-        message: 'Error updating job'
+        message: 'Error updating job' 
       });
     }
   },
 
-  deleteJob: async (req: Request, res: Response) => {
+  deleteJob: async (req: AuthenticatedRequest, res: Response) => {
     try {
       const { id } = req.params;
-      await db.job.delete({
-        where: { id }
+      await prisma.job.delete({
+        where: { id },
       });
-      res.json({
-        success: true,
-        message: 'Job deleted successfully'
-      });
+
+      res.json({ message: 'Job deleted successfully' });
     } catch (error) {
       console.error('Error deleting job:', error);
-      res.status(500).json({
-        success: false,
-        message: 'Error deleting job'
-      });
+      res.status(500).json({ message: 'Error deleting job' });
     }
   },
 
-  async getRecommendations(req: AuthenticatedRequest, res: Response) {
+  getRecommendations: async (req: AuthenticatedRequest, res: Response) => {
     try {
       const userId = req.user.id;
 
@@ -280,11 +462,8 @@ export const jobController = {
         data: recommendedJobs
       });
     } catch (error) {
-      console.error('Error getting job recommendations:', error);
-      if (error instanceof AppError) {
-        throw error;
-      }
-      throw new AppError(500, 'Failed to get job recommendations');
+      console.error('Get recommendations error:', error);
+      res.status(500).json({ message: 'Error fetching job recommendations' });
     }
   }
 };

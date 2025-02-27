@@ -14,7 +14,7 @@ export const LoginForm: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
-  const { setAuth, checkAuth, logout } = useAuthStore(); // Added logout
+  const { setAuth, checkAuth } = useAuthStore();
 
   const { 
     register, 
@@ -27,48 +27,39 @@ export const LoginForm: React.FC = () => {
     try {
       const response = await authApi.login(data);
       
-      if (!response?.data) {
-        throw new Error('No response received from server');
-      }
-
       const { user, token } = response.data;
-      
-      if (!user || !token) {
-        throw new Error('Invalid credentials or server response');
-      }
-
-      // Set auth state
       setAuth(user, token);
       
       // Verify auth state after login
-      try {
-        await checkAuth();
-      } catch (authError) {
-        logout(); // Use logout instead of setAuth(null, null)
-        throw new Error('Failed to verify authentication status');
-      }
-
+      await checkAuth();
+      
       toast.success('Login successful!');
+      
+      // Navigate to the protected page they tried to visit or jobs page
       const from = location.state?.from?.pathname || '/jobs';
       navigate(from, { replace: true });
-      
     } catch (error: any) {
       console.error('Login Error:', error);
       
-      logout(); // Use logout instead of setAuth(null, null)
-      
       let errorMessage = 'Login failed. Please try again.';
-      if (error?.response?.status === 401) {
+      
+      if (error.response?.status === 401) {
         errorMessage = 'Invalid email or password';
-      } else if (error?.response?.status === 404) {
-        errorMessage = 'Authentication service unavailable';
+      } else if (error.response?.status === 400) {
+        errorMessage = error.response.data.message || 'Please enter valid credentials';
+      } else if (error.response?.status === 429) {
+        errorMessage = 'Too many attempts. Please try again later.';
       } else if (error.message) {
         errorMessage = error.message;
       }
-      
+
       toast.error(errorMessage, {
         position: "top-center",
         autoClose: 5000,
+        hideProgressBar: false,
+        closeOnClick: true,
+        pauseOnHover: true,
+        draggable: true,
       });
     } finally {
       setIsLoading(false);

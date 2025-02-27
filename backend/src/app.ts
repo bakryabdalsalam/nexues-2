@@ -7,10 +7,13 @@ import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
 import swaggerOptions from './config/swagger.config';
 import { db } from './services/database.service';
-import { jobRoutes } from './routes/job.routes';
+import jobRoutes from './routes/job.routes';
 import { authRoutes } from './routes/auth.routes';
 import { applicationRoutes } from './routes/application.routes';
 import { adminRoutes } from './routes/admin.routes';
+import { uploadRoutes } from './routes/upload.routes';
+import { companyRoutes } from './routes/company.routes';
+import { userRoutes } from './routes/user.routes';
 import { errorHandler } from './middleware/error.middleware';
 import { apiLimiter, authLimiter } from './middleware/rate-limit.middleware';
 import { swaggerSpec } from './swagger';
@@ -18,16 +21,25 @@ import { swaggerSpec } from './swagger';
 export const app: Express = express();
 
 // Security middleware
-app.use(helmet());
-app.use(cors({
-  origin: process.env.NODE_ENV === 'production' 
-    ? process.env.FRONTEND_URL 
-    : ['http://localhost:3001', 'http://localhost:3000', 'https://automatic-space-broccoli-46w9jq6jg5wc775r-3001.app.github.dev'],
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: "cross-origin" }
+}));
+
+// CORS Configuration
+const corsOptions = {
+  origin: [
+    'http://localhost:3000',
+    'http://localhost:3001',
+    'http://localhost:5173', // Vite default port
+    'http://127.0.0.1:5173',
+  ],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
-  exposedHeaders: ['Set-Cookie']
-}));
+  maxAge: 600 // Cache preflight requests for 10 minutes
+};
+
+app.use(cors(corsOptions));
 
 // Logging and parsing middleware
 app.use(morgan('dev'));
@@ -36,7 +48,7 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(cookieParser());
 
 // Apply rate limiting
-app.use('/api/', apiLimiter);
+app.use('/api', apiLimiter);
 app.use('/api/auth', authLimiter);
 
 // Swagger Documentation
@@ -76,11 +88,44 @@ app.get('/health', async (req, res) => {
   }
 });
 
-// Routes
-app.use('/api/jobs', jobRoutes);
-app.use('/api/auth', authRoutes);
-app.use('/api/applications', applicationRoutes);
-app.use('/api/admin', adminRoutes);
+// API welcome message handler
+const apiWelcomeHandler = (req: express.Request, res: express.Response) => {
+  res.json({
+    status: 'success',
+    message: 'Welcome to the Job Board API',
+    documentation: '/api-docs',
+    version: '1.0.0'
+  });
+};
+
+// API Routes with proper prefixing
+const apiRouter = express.Router();
+
+// Add welcome message for root API endpoint
+apiRouter.get('/', apiWelcomeHandler);
+
+// Mount job routes first to ensure they take precedence
+apiRouter.use('/jobs', jobRoutes);
+apiRouter.use('/auth', authRoutes);
+apiRouter.use('/applications', applicationRoutes);
+apiRouter.use('/admin', adminRoutes);
+apiRouter.use('/upload', uploadRoutes);
+apiRouter.use('/company', companyRoutes);
+apiRouter.use('/users', userRoutes);  // Changed from /user to /users for consistency
+
+// Mount all API routes under /api
+app.use('/api', apiRouter);
+
+// Add explicit error handling for CORS errors
+app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+  if (err.message === 'Not allowed by CORS') {
+    return res.status(403).json({
+      success: false,
+      message: 'CORS error: Origin not allowed'
+    });
+  }
+  next(err);
+});
 
 // Error handling
 app.use(errorHandler);

@@ -1,6 +1,5 @@
 generator client {
   provider = "prisma-client-js"
-  engineType = "binary"
 }
 
 datasource db {
@@ -8,74 +7,36 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-model User {
-  id            String        @id @default(cuid())
-  email         String        @unique
-  password      String
-  name          String?
-  role          UserRole      @default(USER)
-  isActive      Boolean       @default(true)
-  profile       Profile?
-  applications  Application[]
-  createdAt     DateTime      @default(now())
-  updatedAt     DateTime      @updatedAt
-
-  @@map("users")
-}
-
-model Profile {
-  id          String   @id @default(uuid())
-  userId      String   @unique
-  user        User     @relation(fields: [userId], references: [id])
-  resume      String?
-  skills      String[]
-  experience  String?
-  education   String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-}
-
-model Job {
-  id              String        @id @default(uuid())
-  title           String
-  description     String
-  company         String
-  location        String
-  experienceLevel String
-  category        String
-  salary          Float?
-  remote          Boolean       @default(false)
-  applications    Application[]
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
-}
-
-model Application {
-  id           String           @id @default(uuid())
-  jobId        String
-  userId       String
-  status       ApplicationStatus @default(PENDING)
-  resume       String?
-  coverLetter  String?
-  job          Job              @relation(fields: [jobId], references: [id])
-  user         User             @relation(fields: [userId], references: [id])
-  createdAt    DateTime         @default(now())
-  updatedAt    DateTime         @updatedAt
-}
-
-model EmailTemplate {
-  id        String   @id @default(cuid())
-  name      String
-  subject   String
-  content   String
-  variables String[]
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-}
-
 enum UserRole {
   USER
   ADMIN
+  COMPANY
+}
+
+enum JobCategory {
+  ENGINEERING
+  DESIGN
+  PRODUCT
+  MARKETING
+  SALES
+  CUSTOMER_SERVICE
+  OTHER
+}
+
+enum ExperienceLevel {
+  JUNIOR
+  MID_LEVEL
+  SENIOR
+  LEAD
+  EXECUTIVE
+}
+
+enum EmploymentType {
+  FULL_TIME
+  PART_TIME
+  CONTRACT
+  INTERNSHIP
+  TEMPORARY
 }
 
 enum ApplicationStatus {
@@ -83,4 +44,75 @@ enum ApplicationStatus {
   REVIEWING
   ACCEPTED
   REJECTED
+}
+
+model User {
+  id           String        @id @default(cuid())
+  email        String        @unique
+  password     String
+  name         String
+  role         UserRole      @default(USER)
+  isActive     Boolean       @default(true)
+  profile      Profile?
+  jobs         Job[]         @relation("CompanyJobs")
+  applications Application[]
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+}
+
+model Profile {
+  id          String    @id @default(cuid())
+  fullName    String
+  bio         String?
+  avatar      String?
+  skills      String[]  @default([])
+  experience  String?
+  education   String?
+  phoneNumber String?
+  address     String?
+  linkedIn    String?
+  github      String?
+  portfolio   String?
+  userId      String    @unique
+  user        User      @relation(fields: [userId], references: [id])
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
+
+model Job {
+  id              String          @id @default(cuid())
+  title           String
+  description     String
+  location        String
+  salary          Int
+  employmentType  EmploymentType
+  remote          Boolean
+  experienceLevel ExperienceLevel
+  category        JobCategory
+  companyId       String
+  company         User            @relation("CompanyJobs", fields: [companyId], references: [id])
+  applications    Application[]
+  status          String         @default("OPEN")
+  requirements    String[]       @default([])
+  benefits        String[]       @default([])
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  @@index([companyId])
+}
+
+model Application {
+  id        String            @id @default(cuid())
+  userId    String
+  jobId     String
+  status    ApplicationStatus @default(PENDING)
+  message   String?
+  resume    String?
+  user      User             @relation(fields: [userId], references: [id])
+  job       Job              @relation(fields: [jobId], references: [id])
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+
+  @@index([userId])
+  @@index([jobId])
 }

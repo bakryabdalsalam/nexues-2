@@ -1,38 +1,110 @@
 import { Request, Response } from 'express';
 import { prisma } from '../config/prisma';
 import { AuthenticatedRequest } from '../types';
+import { PrismaClient, UserRole } from '@prisma/client';
+
+const prismaClient = new PrismaClient();
 
 export const adminController = {
-  // Get dashboard statistics
   getDashboardStats: async (req: Request, res: Response) => {
     try {
       const [
         totalUsers,
+        totalCompanies,
         totalJobs,
         totalApplications,
-        pendingApplications
+        recentUsers,
+        recentJobs,
+        recentApplications,
       ] = await Promise.all([
-        prisma.user.count(),
-        prisma.job.count(),
-        prisma.application.count(),
-        prisma.application.count({ where: { status: 'PENDING' } })
+        prismaClient.user.count({ where: { role: UserRole.USER } }),
+        prismaClient.user.count({ where: { role: UserRole.COMPANY } }),
+        prismaClient.job.count(),
+        prismaClient.application.count(),
+        prismaClient.user.findMany({
+          take: 5,
+          orderBy: { createdAt: 'desc' },
+          include: { profile: true },
+          where: { role: UserRole.USER }
+        }),
+        prismaClient.job.findMany({
+          take: 5,
+          orderBy: { createdAt: 'desc' },
+          include: {
+            company: {
+              select: {
+                id: true,
+                name: true,
+                email: true,
+                role: true
+              }
+            },
+            applications: {
+              select: {
+                id: true
+              }
+            }
+          }
+        }),
+        prismaClient.application.findMany({
+          take: 5,
+          orderBy: { createdAt: 'desc' },
+          include: {
+            user: {
+              select: {
+                id: true,
+                name: true,
+                email: true,
+              },
+            },
+            job: {
+              include: {
+                company: {
+                  select: {
+                    name: true
+                  }
+                }
+              }
+            },
+          },
+        }),
       ]);
 
       res.json({
         success: true,
         data: {
           totalUsers,
+          totalCompanies,
           totalJobs,
           totalApplications,
-          activeJobs: totalJobs, // Since we don't track active/inactive status
-          pendingApplications
+          recentActivity: {
+            users: recentUsers,
+            jobs: recentJobs.map(job => ({
+              ...job,
+              company: {
+                companyName: job.company?.name || 'N/A'
+              },
+              _count: {
+                applications: job.applications.length
+              }
+            })),
+            applications: recentApplications.map(app => ({
+              ...app,
+              job: {
+                ...app.job,
+                company: {
+                  companyName: app.job.company?.name || 'N/A'
+                }
+              }
+            }))
+          }
         }
       });
     } catch (error) {
-      console.error('Error getting dashboard stats:', error);
-      res.status(500).json({
+      console.error('Get dashboard stats error:', error);
+      res.status(500).json({ 
         success: false,
-        message: 'Failed to get dashboard statistics'
+        message: 'Error fetching dashboard statistics' 
       });
     }
   },
@@ -45,21 +117,18 @@ export const adminController = {
       const skip = (page - 1) * limit;
 
       const [users, total] = await Promise.all([
-        prisma.user.findMany({
+        prismaClient.user.findMany({
           skip,
           take: limit,
           include: {
-            _count: {
-              select: {
-                applications: true
-              }
-            }
+            profile: true,
+            // Remove the company include as it doesn't exist in the schema
           },
           orderBy: {
             createdAt: 'desc'
           }
         }),
-        prisma.user.count()
+        prismaClient.user.count()
       ]);
 
       const pages = Math.ceil(total / limit);
@@ -75,10 +144,10 @@ export const adminController = {
         }
       });
     } catch (error) {
-      console.error('Error getting users:', error);
-      res.status(500).json({
+      console.error('Get all users error:', error);
+      res.status(500).json({ 
         success: false,
-        message: 'Failed to get users'
+        message: 'Error fetching users' 
       });
     }
   },
@@ -91,7 +160,7 @@ export const adminController = {
       const skip = (page - 1) * limit;
 
       const [applications, total] = await Promise.all([
-        prisma.application.findMany({
+        prismaClient.application.findMany({
           skip,
           take: limit,
           include: {
@@ -108,7 +177,7 @@ export const adminController = {
             createdAt: 'desc'
           }
         }),
-        prisma.application.count()
+        prismaClient.application.count()
       ]);
 
       const pages = Math.ceil(total / limit);
@@ -130,5 +199,63 @@ export const adminController = {
         message: 'Failed to get applications'
       });
     }
+  },
+
+  updateUserStatus: async (req: Request, res: Response) => {
+    try {
+      const { userId } = req.params;
+      const { isActive } = req.body;
+
+      const user = await prismaClient.user.update({
+        where: { id: userId },
+        data: { isActive },
+      });
+
+      res.json(user);
+    } catch (error) {
+      console.error('Update user status error:', error);
+      res.status(500).json({ message: 'Error updating user status' });
+    }
+  },
+
+  getSystemLogs: async (req: Request, res: Response) => {
+    try {
+      // This is a placeholder for system logs
+      // In a real application, you would implement proper logging
+      // and retrieve logs from your logging system
+      res.json({
+        message: 'System logs functionality to be implemented',
+        // Add actual log retrieval logic here
+      });
+    } catch (error) {
+      console.error('Get system logs error:', error);
+      res.status(500).json({ message: 'Error fetching system logs' });
+    }
+  },
+
+  manageJobPostings: async (req: Request, res: Response) => {
+    try {
+      const jobs = await prismaClient.job.findMany({
+        include: {
+          company: true,
+          applications: {
+            include: {
+              user: {
+                select: {
+                  id: true,
+                  name: true,
+                  email: true,
+                },
+              },
+            },
+          },
+        },
+      });
+
+      res.json(jobs);
+    } catch (error) {
+      console.error('Manage job postings error:', error);
+      res.status(500).json({ message: 'Error fetching job postings' });
+    }
   }
-}; 
+};

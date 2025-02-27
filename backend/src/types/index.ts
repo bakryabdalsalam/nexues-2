@@ -1,9 +1,10 @@
 import { Request } from 'express';
+import { UserRole } from '@prisma/client';
 
 export interface UserPayload {
   id: string;
   email: string;
-  role: 'USER' | 'ADMIN';
+  role: UserRole;
 }
 
 export interface JobFilters {
@@ -21,7 +22,7 @@ export interface PaginationOptions {
 export interface TokenPayload {
   id: string;
   email: string;
-  role: 'USER' | 'ADMIN';
+  role: UserRole;
 }
 
 export interface AuthenticatedRequest extends Request {

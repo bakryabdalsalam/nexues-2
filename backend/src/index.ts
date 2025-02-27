@@ -1,18 +1,20 @@
 import * as dotenv from 'dotenv';
 import { app } from './app';
-import { Express } from 'express';
-import { initializeDatabase } from './utils/init-db';
+import { db } from './services/database.service';
 
 dotenv.config();
 
-const port = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3000;
 
 async function startServer() {
   try {
-    await initializeDatabase();
-    
-    app.listen(port, () => {
-      console.log(`Server running on port ${port}`);
+    // Test database connection
+    await db.$connect();
+    console.log('Database connection established');
+
+    app.listen(PORT, () => {
+      console.log(`Server running on port ${PORT}`);
+      console.log(`API Documentation available at http://localhost:${PORT}/api-docs`);
     });
   } catch (error) {
     console.error('Failed to start server:', error);
@@ -20,4 +22,4 @@ async function startServer() {
   }
 }
 
-startServer();
+startServer().catch(console.error);

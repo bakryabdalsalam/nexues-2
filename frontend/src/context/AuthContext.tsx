@@ -1,64 +1,127 @@
-import React, { createContext, useContext, useState, useCallback, ReactNode } from 'react';
-import { User, AuthResponse } from '../types';
+import React, { createContext, useContext, useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { toast } from 'react-hot-toast';
 import { authApi } from '../services/api';
-import { toast } from 'react-toastify';
+
+interface User {
+  id: string;
+  email: string;
+  name: string;
+  role: 'USER' | 'ADMIN' | 'COMPANY';
+  profile?: {
+    fullName: string;
+    bio?: string;
+    avatar?: string;
+  };
+}
 
 interface AuthContextType {
   user: User | null;
+  loading: boolean;
   login: (email: string, password: string) => Promise<void>;
-  register: (email: string, password: string, name: string) => Promise<void>;
-  logout: () => void;
-  isLoading: boolean;
+  register: (data: { email: string; password: string; name: string; role?: string }) => Promise<void>;
+  logout: () => Promise<void>;
+  checkAuth: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-export const AuthProvider = ({ children }: { children: ReactNode }) => {
+export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const navigate = useNavigate();
 
-  const handleAuthResponse = (response: AuthResponse) => {
-    setUser(response.user);
-    localStorage.setItem('token', response.token);
+  const checkAuth = async () => {
+    try {
+      const response = await authApi.me();
+      if (response.success) {
+        // Handle the user data from the response - it might be in response.data or response.user
+        const userData = response.user || response.data;
+        if (userData) {
+          setUser(userData);
+        }
+      }
+    } catch (error) {
+      setUser(null);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const login = useCallback(async (email: string, password: string) => {
+  useEffect(() => {
+    checkAuth();
+  }, []);
+
+  const login = async (email: string, password: string) => {
     try {
-      setIsLoading(true);
       const response = await authApi.login({ email, password });
-      handleAuthResponse(response);
-      toast.success('Login successful!');
-    } catch (error) {
-      toast.error('Login failed. Please check your credentials.');
-      throw error;
-    } finally {
-      setIsLoading(false);
-    }
-  }, []);
-
-  const register = useCallback(async (email: string, password: string, name: string) => {
-    try {
-      setIsLoading(true);
-      const response = await authApi.register({ email, password, name });
-      handleAuthResponse(response);
-      toast.success('Registration successful!');
+      if (response.success) {
+        // Handle the user data from the response - it might be in response.data or response.user
+        const userData = response.user || response.data;
+        setUser(userData);
+        toast.success('Login successful');
+        
+        // Redirect based on user role
+        switch (userData.role) {
+          case 'ADMIN':
+            navigate('/admin');
+            break;
+          case 'COMPANY':
+            navigate('/company');
+            break;
+          default:
+            navigate('/dashboard');
+        }
+      }
     } catch (error: any) {
-      const message = error.response?.data?.message || 'Registration failed. Please try again.';
-      toast.error(message);
+      toast.error(error.message || 'Login failed');
       throw error;
-    } finally {
-      setIsLoading(false);
     }
-  }, []);
+  };
 
-  const logout = useCallback(() => {
-    setUser(null);
-    localStorage.removeItem('token');
-    toast.info('Logged out successfully');
-  }, []);
+  const register = async (data: { email: string; password: string; name: string; role?: string }) => {
+    try {
+      const response = await authApi.register(data);
+      if (response.success) {
+        // Handle the user data from the response - it might be in response.data or response.user
+        const userData = response.user || response.data;
+        setUser(userData);
+        toast.success('Registration successful');
+        
+        // Redirect based on user role
+        switch (userData.role) {
+          case 'ADMIN':
+            navigate('/admin');
+            break;
+          case 'COMPANY':
+            navigate('/company');
+            break;
+          default:
+            navigate('/dashboard');
+        }
+      }
+    } catch (error: any) {
+      toast.error(error.message || 'Registration failed');
+      throw error;
+    }
+  };
+
+  const logout = async () => {
+    try {
+      const response = await authApi.logout();
+      if (response.success) {
+        setUser(null);
+        toast.success('Logged out successfully');
+        navigate('/login');
+      }
+    } catch (error: any) {
+      toast.error(error.message || 'Error logging out');
+      throw error;
+    }
+  };
 
   return (
-    <AuthContext.Provider value={{ user, login, register, logout, isLoading }}>
+    <AuthContext.Provider value={{ user, loading, login, register, logout, checkAuth }}>
       {children}
     </AuthContext.Provider>
   );
@@ -71,3 +134,5 @@ export const useAuth = () => {
   }
   return context;
 };
+
+export default AuthContext;

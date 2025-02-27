@@ -1,77 +1,154 @@
-import React from 'react';
-import { Routes, Route, Navigate } from 'react-router-dom';
-import { JobList } from '../components/jobs/JobList';
-import { JobDetail } from '../pages/JobDetail';
-import { LoginForm } from '../components/auth/LoginForm';
-import { RegisterPage } from '../pages/RegisterPage';
-import { ProtectedRoute } from '../components/auth/ProtectedRoute';
-import { Dashboard } from '../pages/Dashboard';
-import { Profile } from '../pages/Profile';
-import { MyApplications } from '../pages/MyApplications';
-import { AdminLayout } from '../components/admin/AdminLayout';
-import { AdminDashboard } from '../components/admin/Dashboard';
-import { UserManagement } from '../components/admin/UserManagement';
-import { ApplicationManager } from '../components/admin/ApplicationManager';
-import { JobTable } from '../components/admin/JobTable';
-import { ReportGenerator } from '../components/admin/ReportGenerator';
-import { EmailTemplates } from '../components/admin/EmailTemplates';
-import { LandingPage } from '../pages/LandingPage';
+import React, { lazy, Suspense } from 'react';
+import { Routes, Route } from 'react-router-dom';
+import ProtectedRoute from '../components/ProtectedRoute';
+import Login from '../pages/Login';
+import Register from '../pages/Register';
+import UserDashboard from '../pages/UserDashboard';
+import CompanyDashboard from '../pages/CompanyDashboard';
+import AdminDashboard from '../pages/AdminDashboard';
+import JobListings from '../pages/JobListings';
+import JobDetails from '../pages/JobDetails';
+import JobApplicationForm from '../components/forms/JobApplicationForm';
+import UserProfileForm from '../components/forms/UserProfileForm';
+import CompanyProfileForm from '../components/forms/CompanyProfileForm';
+import JobPostForm from '../components/forms/JobPostForm';
+import Unauthorized from '../pages/Unauthorized';
+import ErrorBoundary from '../components/common/ErrorBoundary';
+
+// Lazy-loaded admin components
+const AdminUsers = lazy(() => import('../pages/admin/AdminUsers'));
+const AdminJobs = lazy(() => import('../pages/admin/AdminJobs'));
+const AdminApplications = lazy(() => import('../pages/admin/AdminApplications'));
+
+// Loading fallback component
+const LoadingFallback = () => (
+  <div className="flex justify-center items-center h-screen">
+    <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
+  </div>
+);
 
 export const AppRoutes: React.FC = () => {
   return (
     <Routes>
       {/* Public Routes */}
-      <Route path="/" element={<LandingPage />} />
-      <Route path="/jobs" element={<JobList />} />
-      <Route path="/jobs/:id" element={<JobDetail />} />
-      <Route path="/login" element={<LoginForm />} />
-      <Route path="/register" element={<RegisterPage />} />
-
-      {/* Protected Routes */}
+      <Route path="/login" element={<Login />} />
+      <Route path="/register" element={<Register />} />
+      <Route path="/jobs" element={<JobListings />} />
+      <Route path="/jobs/:id" element={<JobDetails />} />
+      <Route path="/unauthorized" element={<Unauthorized />} />
+      
+      {/* Protected User Routes */}
       <Route
         path="/dashboard"
         element={
-          <ProtectedRoute>
-            <Dashboard />
+          <ProtectedRoute allowedRoles={['USER']}>
+            <UserDashboard />
           </ProtectedRoute>
         }
       />
       <Route
-        path="/profile"
+        path="/profile/edit"
         element={
-          <ProtectedRoute>
-            <Profile />
+          <ProtectedRoute allowedRoles={['USER']}>
+            <UserProfileForm />
           </ProtectedRoute>
         }
       />
       <Route
-        path="/applications"
+        path="/jobs/:id/apply"
         element={
-          <ProtectedRoute>
-            <MyApplications />
+          <ProtectedRoute allowedRoles={['USER']}>
+            <JobApplicationForm />
           </ProtectedRoute>
         }
       />
-
-      {/* Admin Routes */}
+      
+      {/* Protected Company Routes */}
+      <Route
+        path="/company"
+        element={
+          <ProtectedRoute allowedRoles={['COMPANY']}>
+            <CompanyDashboard />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/company/profile/edit"
+        element={
+          <ProtectedRoute allowedRoles={['COMPANY']}>
+            <CompanyProfileForm />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/company/jobs/create"
+        element={
+          <ProtectedRoute allowedRoles={['COMPANY']}>
+            <JobPostForm />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/company/jobs/:id/edit"
+        element={
+          <ProtectedRoute allowedRoles={['COMPANY']}>
+            <JobPostForm isEditing />
+          </ProtectedRoute>
+        }
+      />
+      
+      {/* Protected Admin Routes */}
       <Route
         path="/admin"
         element={
-          <ProtectedRoute requireAdmin>
-            <AdminLayout />
+          <ProtectedRoute allowedRoles={['ADMIN']}>
+            <ErrorBoundary>
+              <AdminDashboard />
+            </ErrorBoundary>
           </ProtectedRoute>
         }
-      >
-        <Route index element={<AdminDashboard />} />
-        <Route path="users" element={<UserManagement />} />
-        <Route path="applications" element={<ApplicationManager />} />
-        <Route path="jobs" element={<JobTable />} />
-        <Route path="reports" element={<ReportGenerator />} />
-        <Route path="email-templates" element={<EmailTemplates />} />
-      </Route>
-
-      {/* Fallback Route */}
-      <Route path="*" element={<Navigate to="/" replace />} />
+      />
+      
+      {/* Additional Admin Routes */}
+      <Route
+        path="/admin/users"
+        element={
+          <ProtectedRoute allowedRoles={['ADMIN']}>
+            <ErrorBoundary>
+              <Suspense fallback={<LoadingFallback />}>
+                <AdminUsers />
+              </Suspense>
+            </ErrorBoundary>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/admin/jobs"
+        element={
+          <ProtectedRoute allowedRoles={['ADMIN']}>
+            <ErrorBoundary>
+              <Suspense fallback={<LoadingFallback />}>
+                <AdminJobs />
+              </Suspense>
+            </ErrorBoundary>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/admin/applications"
+        element={
+          <ProtectedRoute allowedRoles={['ADMIN']}>
+            <ErrorBoundary>
+              <Suspense fallback={<LoadingFallback />}>
+                <AdminApplications />
+              </Suspense>
+            </ErrorBoundary>
+          </ProtectedRoute>
+        }
+      />
+      
+      {/* Default Route */}
+      <Route path="/" element={<JobListings />} />
     </Routes>
   );
 };
