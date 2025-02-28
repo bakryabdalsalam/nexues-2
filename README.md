@@ -165,5 +165,4 @@ MIT License
 
 ## Support
 For technical support, please contact:
-- Email: support@yourplatform.com
-- Discord: [Community Link]
+- Email: bakryabdalsalam6@gmail.com
